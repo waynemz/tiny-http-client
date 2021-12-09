@@ -664,3 +664,25 @@ int tiny_http_client_add_header(TinyHttpClient* thiz, char* key_value){
 	return 0;
 }
 
+int tiny_http_clinet_get(TinyHttpClient* thiz,\
+                          char* url,\
+                          char* params,\
+                          char* response,\
+                          size_t max_len){
+
+    //To Do
+    return 0;
+}
+
+
+int tiny_http_clinet_post(TinyHttpClient* thiz,\
+                          char* url,\
+                          char* params,\
+                          char* response,\
+                          size_t max_len){
+
+    //To Do
+
+    return 0;
+}
+

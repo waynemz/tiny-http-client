@@ -19,14 +19,12 @@ int tiny_http_client_upload_file(TinyHttpClient* thiz,\
 
 int tiny_http_clinet_get(TinyHttpClient* thiz,\
                           char* url,\
-                          char* header,\
                           char* params,\
                           char* response,\
                           size_t max_len);
 
 int tiny_http_clinet_post(TinyHttpClient* thiz,\
                           char* url,\
-                          char* header,\
                           char* params,\
                           char* response,\
                           size_t max_len);
