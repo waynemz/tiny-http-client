@@ -18,10 +18,11 @@
 
 #define TINY_HTTP_BOUNDARY "------tinyhttpclientboundary"
 
-#define HTTP_HEAD   "POST %s HTTP/1.1\r\n"\
-                    "Host: %s\r\n"\
-                    "Content-Type: multipart/form-data; boundary=%s\r\n"\
-                    "Content-Length: %ld\r\n"
+#define HTTP_HEAD_COMMON "%s %s HTTP/1.1\r\n"\
+                         "Host: %s\r\n"\
+
+#define HTTP_HEAD_UPLOAD_CONTENT_TYPE   "Content-Type: multipart/form-data; boundary=%s\r\n"
+#define HTTP_HEAD_CONTENT_LENGTH        "Content-Length: %ld\r\n"
 
 #define HTTP_HEAD_END	"Connection: close\r\n\r\n"
 
@@ -232,7 +233,7 @@ static int _close_sock(int sock){
     return 0;
 }
 
-static int _parse_get_server_port(char* url, char server[64], unsigned short* port, char path[64]){
+static int _parse_get_server_port_path(char* url, char server[64], unsigned short* port, char path[64]){
     if(url == NULL || server == NULL || path == NULL){
         return -1;
     }
@@ -424,6 +425,12 @@ int tiny_http_client_upload_file(TinyHttpClient* thiz,\
                                 char* upload_file_path,\
                                 int param_nums,...){
     if(thiz == NULL || url == NULL || upload_file_filed == NULL || upload_file_path == NULL){
+        printf("[%s][%d] invalid param.\n", __func__, __LINE__);
+        return -1;
+    }
+
+    if(strstr(url, "https") != NULL){
+        printf("[%s][%d] not support https protocol.\n", __func__, __LINE__);
         return -1;
     }
 
@@ -446,35 +453,9 @@ int tiny_http_client_upload_file(TinyHttpClient* thiz,\
     unsigned short port = 0;
     char path[64] = {0};
 
-    ret = _parse_get_server_port(url, server, &port, path);
+    ret = _parse_get_server_port_path(url, server, &port, path);
     if(ret != 0){
         printf("[%s][%d] parse get server port failed.\n", __func__, __LINE__);
-        return -1;
-    }
-
-    int sock = -1;
-
-    sock = _create_sock();
-
-    struct hostent* host;
-
-    host = gethostbyname(server);
-    if(host == NULL){
-        printf("gethostbyname failed.\n");
-        _close_sock(sock);
-        return -1;
-    }
-
-    struct sockaddr_in daddr;
-    bzero(&daddr, sizeof( struct sockaddr_in ) );
-    daddr.sin_family        = AF_INET;
-    daddr.sin_port          = htons(port);
-    daddr.sin_addr = *((struct in_addr *)host->h_addr);
-
-    ret = connect(sock, ( struct sockaddr* )&daddr, sizeof( struct sockaddr ));
-    if(ret == -1){ 
-        perror("connect failed!\n");
-        _close_sock(sock);
         return -1;
     }
 
@@ -487,7 +468,6 @@ int tiny_http_client_upload_file(TinyHttpClient* thiz,\
 
     sprintf(end, "\r\n--%s--\r\n", TINY_HTTP_BOUNDARY);
     end_len = strlen(end);
-
 
     size_t form_data_len = 0;
 
@@ -517,7 +497,9 @@ int tiny_http_client_upload_file(TinyHttpClient* thiz,\
 
     total_http_content_size = form_data_len + upload_request_len + filesize + end_len;
 
-	snprintf(http_head, 1024, HTTP_HEAD, path, server, TINY_HTTP_BOUNDARY, total_http_content_size); 
+    snprintf(http_head, 1024, HTTP_HEAD_COMMON, "POST", path, server);
+    snprintf(http_head + strlen(http_head), 1024 - strlen(http_head), HTTP_HEAD_UPLOAD_CONTENT_TYPE, TINY_HTTP_BOUNDARY);
+    snprintf(http_head + strlen(http_head), 1024 - strlen(http_head), HTTP_HEAD_CONTENT_LENGTH, total_http_content_size);
 
 	TinyHttpClientHeader* header = thiz->header;
 	while(header != NULL){
@@ -539,7 +521,6 @@ int tiny_http_client_upload_file(TinyHttpClient* thiz,\
     send_buff = (char*)malloc(send_size + 1);
     if(send_buff == NULL){
         printf("[%s][%d] malloc memory failed.\n", __func__, __LINE__);
-        _close_sock(sock);
         return -1;
     }
 
@@ -557,6 +538,35 @@ int tiny_http_client_upload_file(TinyHttpClient* thiz,\
 	if(thiz->debug_enable){
 		printf("[%s][%d] >>>>>>>>>>>>>>>>>>>>> \n %s\n", __func__, __LINE__, send_buff);
 	}
+
+    int sock = -1;
+
+    sock = _create_sock();
+
+    struct hostent* host;
+
+    host = gethostbyname(server);
+    if(host == NULL){
+        printf("gethostbyname failed.\n");
+        free(send_buff);
+        _close_sock(sock);
+        return -1;
+    }
+
+    struct sockaddr_in daddr;
+    bzero(&daddr, sizeof( struct sockaddr_in ) );
+    daddr.sin_family        = AF_INET;
+    daddr.sin_port          = htons(port);
+    daddr.sin_addr = *((struct in_addr *)host->h_addr);
+
+    ret = connect(sock, ( struct sockaddr* )&daddr, sizeof( struct sockaddr ));
+    if(ret == -1){ 
+        perror("connect failed!\n");
+        free(send_buff);
+        _close_sock(sock);
+        return -1;
+    }
+
 
     ret = _send_data(sock, send_buff, copy_len);
     if(ret < 0){
@@ -664,24 +674,223 @@ int tiny_http_client_add_header(TinyHttpClient* thiz, char* key_value){
 	return 0;
 }
 
-int tiny_http_clinet_get(TinyHttpClient* thiz,\
-                          char* url,\
-                          char* params,\
-                          char* response,\
-                          size_t max_len){
 
-    //To Do
-    return 0;
+int tiny_http_clinet_get(TinyHttpClient* thiz, char* url, char* params){
+    if(thiz == NULL || url == NULL){
+        printf("[%s][%d] invalid param.\n", __func__, __LINE__);
+        return -1;
+    }  
+
+    if(strstr(url, "https") != NULL){
+        printf("[%s][%d] not support https protocol.\n", __func__, __LINE__);
+        return -1;
+    }
+
+    int ret = -1;
+    char server[64] = {0};
+    unsigned short port = 0;
+    char path[64] = {0};
+
+    ret = _parse_get_server_port_path(url, server, &port, path);
+    if(ret != 0){
+        printf("[%s][%d] parse get server port failed.\n", __func__, __LINE__);
+        return -1;
+    }
+
+    char get_path[1024] = {0};
+
+
+    strcpy(get_path, path);
+
+    strcat(get_path, "?");
+
+    if(params != NULL){
+        strcat(get_path, params);
+    }   
+
+    char http_head[1024] = {0};
+    snprintf(http_head, 1024, HTTP_HEAD_COMMON, "GET", get_path, server);
+
+    TinyHttpClientHeader* header = thiz->header;
+    while(header != NULL){
+        char buff[256] = {0};
+        snprintf(buff, 256, "%s\r\n", header->key_value);
+        strcat(http_head, buff);
+        header = header->next;
+    }
+
+    strcat(http_head, HTTP_HEAD_END);
+
+    int sock = -1;
+
+    sock = _create_sock();
+
+    struct hostent* host;
+
+    host = gethostbyname(server);
+    if(host == NULL){
+        printf("gethostbyname failed.\n");
+        _close_sock(sock);
+        return -1;
+    }
+
+    struct sockaddr_in daddr;
+    bzero(&daddr, sizeof( struct sockaddr_in ) );
+    daddr.sin_family        = AF_INET;
+    daddr.sin_port          = htons(port);
+    daddr.sin_addr = *((struct in_addr *)host->h_addr);
+
+    ret = connect(sock, ( struct sockaddr* )&daddr, sizeof( struct sockaddr ));
+    if(ret == -1){ 
+        perror("connect failed!\n");
+        _close_sock(sock);
+        return -1;
+    }
+
+    ret = _send_data(sock, http_head, strlen(http_head) + 1);
+    if(ret < 0){
+        _close_sock(sock);
+        return -1;
+    }
+
+    char recv_buff[4096] = {0};
+    ret = recv(sock, recv_buff, 4096, 0);
+    if(ret < 0){
+        printf("[%s][%d] recv failed, error:%s.\n", __func__, __LINE__, strerror(errno));
+        _close_sock(sock);
+        return -1;
+    }else{
+        _close_sock(sock);
+
+        if(thiz->debug_enable){
+            printf("[%s][%d] <<<<<<<<<<<<<<<<<<<< \n %s\n", __func__, __LINE__, recv_buff);
+        }
+
+        int http_code = 0;
+        char response[4096] = {0};
+
+        ret = _parse_recv_get_http_code_response(recv_buff, &http_code, response, 4096);
+        if(ret < 0){
+            printf("[%s][%d] parse recv get http code response failed.", __func__, __LINE__);
+            return -1;
+        }
+
+        thiz->resp_http_code = http_code;
+        if(thiz->response != NULL){
+            free(thiz->response);
+            thiz->response = NULL;
+        }
+        thiz->response = strdup(response);
+
+        return 0;
+    }
 }
 
 
-int tiny_http_clinet_post(TinyHttpClient* thiz,\
-                          char* url,\
-                          char* params,\
-                          char* response,\
-                          size_t max_len){
-    //To Do
+int tiny_http_clinet_post(TinyHttpClient* thiz, char* url, char* params){
+    if(thiz == NULL || url == NULL){
+        printf("[%s][%d] invalid param.\n", __func__, __LINE__);
+        return -1;
+    }  
 
-    return 0;
+    if(strstr(url, "https") != NULL){
+        printf("[%s][%d] not support https protocol.\n", __func__, __LINE__);
+        return -1;
+    }
+
+    int ret = -1;
+    char server[64] = {0};
+    unsigned short port = 0;
+    char path[64] = {0};
+
+    ret = _parse_get_server_port_path(url, server, &port, path);
+    if(ret != 0){
+        printf("[%s][%d] parse get server port failed.\n", __func__, __LINE__);
+        return -1;
+    }
+
+    char http_head[1024] = {0};
+
+    snprintf(http_head, 1024, HTTP_HEAD_COMMON, "POST", path, server);
+    snprintf(http_head + strlen(http_head), 1024 - strlen(http_head), "Content-Type: %s\r\n", "application/x-www-form-urlencoded");
+    snprintf(http_head + strlen(http_head), 1024 - strlen(http_head), HTTP_HEAD_CONTENT_LENGTH, strlen(params));
+
+    TinyHttpClientHeader* header = thiz->header;
+    while(header != NULL){
+        char buff[256] = {0};
+        snprintf(buff, 256, "%s\r\n", header->key_value);
+        strcat(http_head, buff);
+        header = header->next;
+    }
+
+    strcat(http_head, HTTP_HEAD_END);
+
+    strcat(http_head, params);
+    strcat(http_head, "\r\n\r\n");
+
+    int sock = -1;
+
+    sock = _create_sock();
+
+    struct hostent* host;
+
+    host = gethostbyname(server);
+    if(host == NULL){
+        printf("gethostbyname failed.\n");
+        _close_sock(sock);
+        return -1;
+    }
+
+    struct sockaddr_in daddr;
+    bzero(&daddr, sizeof( struct sockaddr_in ) );
+    daddr.sin_family        = AF_INET;
+    daddr.sin_port          = htons(port);
+    daddr.sin_addr = *((struct in_addr *)host->h_addr);
+
+    ret = connect(sock, ( struct sockaddr* )&daddr, sizeof( struct sockaddr ));
+    if(ret == -1){ 
+        perror("connect failed!\n");
+        _close_sock(sock);
+        return -1;
+    }
+
+    ret = _send_data(sock, http_head, strlen(http_head) + 1);
+    if(ret < 0){
+        _close_sock(sock);
+        return -1;
+    }
+
+    char recv_buff[4096] = {0};
+    ret = recv(sock, recv_buff, 4096, 0);
+    if(ret < 0){
+        printf("[%s][%d] recv failed, error:%s.\n", __func__, __LINE__, strerror(errno));
+        _close_sock(sock);
+        return -1;
+    }else{
+        _close_sock(sock);
+
+        if(thiz->debug_enable){
+            printf("[%s][%d] <<<<<<<<<<<<<<<<<<<< \n %s\n", __func__, __LINE__, recv_buff);
+        }
+
+        int http_code = 0;
+        char response[4096] = {0};
+
+        ret = _parse_recv_get_http_code_response(recv_buff, &http_code, response, 4096);
+        if(ret < 0){
+            printf("[%s][%d] parse recv get http code response failed.", __func__, __LINE__);
+            return -1;
+        }
+
+        thiz->resp_http_code = http_code;
+        if(thiz->response != NULL){
+            free(thiz->response);
+            thiz->response = NULL;
+        }
+        thiz->response = strdup(response);
+
+        return 0;
+    }
 }
+
 
